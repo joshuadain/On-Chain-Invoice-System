@@ -9,6 +9,8 @@
 (define-constant ERR_RECURRING_NOT_FOUND (err u108))
 (define-constant ERR_RECURRING_PAUSED (err u109))
 (define-constant ERR_INVALID_INTERVAL (err u110))
+(define-constant ERR_NOTE_TOO_LONG (err u111))
+(define-constant ERR_NOTE_ALREADY_EXISTS (err u112))
 
 (define-constant STATUS_PENDING u0)
 (define-constant STATUS_PAID u1)
@@ -78,6 +80,24 @@
 (define-map recurring-invoice-history
   uint
   (list 100 uint)
+)
+
+(define-map invoice-notes
+  uint
+  {
+    note: (string-utf8 500),
+    creator: principal,
+    timestamp: uint
+  }
+)
+
+(define-map payment-notes
+  uint
+  {
+    payer: principal,
+    note: (string-utf8 500),
+    timestamp: uint
+  }
 )
 
 (define-private (get-next-invoice-id)
@@ -382,4 +402,51 @@
 
 (define-read-only (get-total-recurring-invoices)
   (var-get recurring-counter)
+)
+
+(define-public (add-invoice-note (invoice-id uint) (note (string-utf8 500)))
+  (let ((invoice (unwrap! (map-get? invoices invoice-id) ERR_INVOICE_NOT_FOUND))
+        (existing-note (map-get? invoice-notes invoice-id))
+        (current-time (default-to u0 (get-stacks-block-info? time stacks-block-height))))
+    (asserts! (is-eq tx-sender (get creator invoice)) ERR_NOT_AUTHORIZED)
+    (asserts! (is-eq (get status invoice) STATUS_PENDING) ERR_INVOICE_ALREADY_PAID)
+    (asserts! (is-none existing-note) ERR_NOTE_ALREADY_EXISTS)
+    (asserts! (> (len note) u0) ERR_NOTE_TOO_LONG)
+    (map-set invoice-notes invoice-id {
+      note: note,
+      creator: tx-sender,
+      timestamp: current-time
+    })
+    (ok true)
+  )
+)
+
+(define-public (add-payment-note (invoice-id uint) (note (string-utf8 500)))
+  (let ((payment (unwrap! (map-get? invoice-payments invoice-id) ERR_INVOICE_NOT_FOUND))
+        (existing-note (map-get? payment-notes invoice-id))
+        (current-time (default-to u0 (get-stacks-block-info? time stacks-block-height))))
+    (asserts! (is-eq tx-sender (get payer payment)) ERR_NOT_AUTHORIZED)
+    (asserts! (is-none existing-note) ERR_NOTE_ALREADY_EXISTS)
+    (asserts! (> (len note) u0) ERR_NOTE_TOO_LONG)
+    (map-set payment-notes invoice-id {
+      payer: tx-sender,
+      note: note,
+      timestamp: current-time
+    })
+    (ok true)
+  )
+)
+
+(define-read-only (get-invoice-note (invoice-id uint))
+  (match (map-get? invoice-notes invoice-id)
+    note-data (ok note-data)
+    ERR_INVOICE_NOT_FOUND
+  )
+)
+
+(define-read-only (get-payment-note (invoice-id uint))
+  (match (map-get? payment-notes invoice-id)
+    note-data (ok note-data)
+    ERR_INVOICE_NOT_FOUND
+  )
 )
